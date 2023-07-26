@@ -96,6 +96,9 @@ class Game2048:
         if not self.game_over():
             self.add_random_tile()
 def switch(a):
+    """
+    将数字转换为化学符号
+    """
     if(a==2):
         return "H"
     elif(a==4):
@@ -121,6 +124,7 @@ def switch(a):
     else:
         return str(a)
 def get_gesture_name(gesture_code):
+
     gesture_names = {
         1: "向右",
         2: "向左",
