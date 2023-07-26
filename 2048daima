@@ -1,0 +1,359 @@
+from paj7620 import PAJ7620
+from machine import SPI, Pin, I2C
+import utime
+import st7789
+import urandom
+import icm20948
+imu = icm20948.ICM20948(I2C(0), gyro_scale=icm20948.DPS_2000,accel_scale=icm20948.GPM_8)
+i2c = I2C(1, sda=Pin(0), scl=Pin(1), freq=400000)
+sensor7620 = PAJ7620(i2c, addr=0x73)
+spi = SPI(0, baudrate=40000000, polarity=1, phase=0, bits=8, endia=0, sck=Pin(6), mosi=Pin(8))
+display = st7789.ST7789(spi, 240, 240, reset=Pin(11,func=Pin.GPIO, dir=Pin.OUT), dc=Pin(7,func=Pin.GPIO, dir=Pin.OUT))
+display.init()
+def shuffle(lst):
+    for i in range(len(lst)-1, 0, -1):
+        j = urandom.randint(0, i)
+        lst[i], lst[j] = lst[j], lst[i]
+    return lst
+class Game2048:
+    def __init__(self, size=4):
+        self.size = size
+        self.reset()
+    def reset(self):
+        self.board = [[0]*self.size for _ in range(self.size)]
+        self.add_random_tile()
+        self.add_random_tile()
+    def slide_row(self, row):
+        new_row = [i for i in row if i != 0]
+        new_row += [0]*(self.size - len(new_row))
+        return new_row
+    def combine_row(self, row):
+        pair = False
+        new_row = []
+        for i in range(self.size-1, -1, -1):
+            if pair:
+                new_row.append(2*row[i])
+                pair = False
+            else:
+                if i > 0 and row[i] == row[i-1]:
+                    pair = True
+                    new_row.append(0)
+                else:
+                    new_row.append(row[i])
+        return new_row[::-1]
+    def compress(self, grid):
+        new_grid = [self.slide_row(row) for row in grid]
+        return new_grid
+    def merge(self, grid):
+        new_grid = [self.combine_row(row) for row in grid]
+        return new_grid
+    def reverse(self, grid):
+        new_grid = [row[::-1] for row in grid]
+        return new_grid
+    def transpose(self, grid):
+        new_grid = [list(row) for row in zip(*grid)]
+        return new_grid
+    def add_random_tile(self):
+        empty_cells = self.get_empty_cells()
+        if len(empty_cells) > 0:
+            r, c = empty_cells[0]
+            self.board[r][c] = 2 if urandom.randint(0, 1) == 0 else 4
+    def get_empty_cells(self):
+        cells = [(ix, iy) for ix, row in enumerate(self.board) for iy, i in enumerate(row) if i == 0]
+        return shuffle(cells)
+    def game_over(self):
+        for i in range(self.size):
+            for j in range(self.size-1):
+                if self.board[i][j] == self.board[i][j+1] or self.board[j][i] == self.board[j+1][i]:
+                    return False
+        return len(self.get_empty_cells()) == 0
+    def move(self, direction):
+        direction = direction.lower()
+        if direction == 'up':
+            self.board = self.compress(self.board)
+            self.board = self.merge(self.board)
+            self.board = self.compress(self.board)
+        elif direction == 'down':
+            self.board = self.reverse(self.board)
+            self.board = self.compress(self.board)
+            self.board = self.merge(self.board)
+            self.board = self.compress(self.board)
+            self.board = self.reverse(self.board)
+        elif direction == 'left':
+            self.board = self.transpose(self.board)
+            self.board = self.compress(self.board)
+            self.board = self.merge(self.board)
+            self.board = self.compress(self.board)
+            self.board = self.transpose(self.board)
+        elif direction == 'right':
+            self.board = self.transpose(self.board)
+            self.board = self.reverse(self.board)
+            self.board = self.compress(self.board)
+            self.board = self.merge(self.board)
+            self.board = self.compress(self.board)
+            self.board = self.reverse(self.board)
+            self.board = self.transpose(self.board)
+        if not self.game_over():
+            self.add_random_tile()
+def switch(a):
+    if(a==2):
+        return "H"
+    elif(a==4):
+        return "He"
+    elif(a==8):
+        return "Li"
+    elif(a==16):
+        return "Be"
+    elif(a==32):
+        return "B"
+    elif(a==64):
+        return "C"
+    elif(a==128):
+        return "N"
+    elif(a==256):
+        return "O"
+    elif(a==512):
+        return "F"
+    elif(a==1024):
+        return "Ne"
+    elif(a==2048):
+        return "Na"
+    else:
+        return str(a)
+def get_gesture_name(gesture_code):
+    gesture_names = {
+        1: "向右",
+        2: "向左",
+        3: "向下",
+        4: "向上",
+        5: "向前",
+        6: "向后",
+        7: "逆时针",
+        8: "顺时针",
+        9: "挥手",
+    }
+    return gesture_names.get(gesture_code, "未知手势")
+def get_num(a):
+    c=a
+    b=1
+    while(c>1):
+        b=b+1
+        c=c/2
+    return b
+def classify_acceleration(x, y):
+    if(x > 700 and -700 < y < 700):
+        return 4
+    elif(x < -700 and -700 < y < 700):
+        return 3
+    elif(y > 700 and -700 < x < 700):
+        return 1
+    elif(y < -700 and -700 < x < 700):
+        return 2
+    elif(-300 < x < 300 and -300 < y < 300):
+        return 0
+    else:
+        return -1
+def pm1():
+    display.fill(st7789.color565(250,248,239))
+    display.fill_circle(70, 80, 50, st7789.color565(255,200,0))
+    display.draw_string(50, 66, 'Na', color=st7789.WHITE, bg=st7789.color565(255,200,0), size=4, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.fill_rect(140, 30, 80, 40, st7789.color565(187,173,160))
+    display.fill_rect(140, 100, 80, 40, st7789.color565(238,228,218))
+    display.fill_rect(140, 170, 80, 40, st7789.color565(238,228,218))
+    display.draw_string(150, 40, 'New!', color=st7789.color565(238,228,218), bg=st7789.color565(187,173,160), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 110, 'Meth', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 180, 'Intr', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+def ch1():
+    display.fill_rect(140, 30, 80, 40, st7789.color565(187,173,160))
+    display.fill_rect(140, 100, 80, 40, st7789.color565(238,228,218))
+    display.fill_rect(140, 170, 80, 40, st7789.color565(238,228,218))
+    display.draw_string(150, 40, 'New!', color=st7789.color565(238,228,218), bg=st7789.color565(187,173,160), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 110, 'Meth', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 180, 'Intr', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+def ch2():
+    display.fill_rect(140, 30, 80, 40, st7789.color565(238,228,218))
+    display.fill_rect(140, 100, 80, 40, st7789.color565(187,173,160))
+    display.fill_rect(140, 170, 80, 40, st7789.color565(238,228,218))
+    display.draw_string(150, 40, 'New!', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 110, 'Meth', color=st7789.color565(238,228,218), bg=st7789.color565(187,173,160), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 180, 'Intr', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+def ch3():
+    display.fill_rect(140, 30, 80, 40, st7789.color565(238,228,218))
+    display.fill_rect(140, 100, 80, 40, st7789.color565(238,228,218))
+    display.fill_rect(140, 170, 80, 40, st7789.color565(187,173,160))
+    display.draw_string(150, 40, 'New!', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 110, 'Meth', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(150, 180, 'Intr', color=st7789.color565(238,228,218), bg=st7789.color565(187,173,160), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+def intr():
+    display.fill(st7789.color565(238,228,218))
+    display.draw_string(0, 0, 'Game Description:', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 21, '  The chemical element version 2048 mini', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 35, 'game has a total of 16 grids.The initial', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 49, 'interface element is composed of (H) or ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 63, '(He).When you slide the interface with  ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 77, 'your fingers, two identical elements    ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 91, 'collide and merge to produce elements   ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 105, 'with higher Atomic number in turn. Each ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 119, 'time you slide, the blank will randomly ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 133, 'refresh a grid of elements. When the    ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 147, 'interface is completely filled with     ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 161, 'elements and cannot slide,the game ends.', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 175, 'During this time, when the magnesium    ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 189, 'element (Na) comes out, win the game!   ', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=1, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+def meth():
+    display.fill(st7789.color565(238,228,218))
+    display.draw_string(0, 0, 'How to play:', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 28, ' Wave left------>LEFT', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 49, ' Wave right---->RIGHT', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 70, ' Wave up---------->UP', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 91, ' Wave down------>DOWN', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 112, ' Clockwise-------->OK', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string(0, 133, ' Anticlockwise->RESET', color=st7789.color565(119,110,101), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+def over():
+    display.fill(st7789.color565(238,228,218))
+    display.draw_string( 26,100, 'GAME OVER', color=st7789.color565(187,173,160), bg=st7789.color565(238,228,218), size=4, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+    display.draw_string( 10,200, 'Clockwise to restart', color=st7789.color565(187,173,160), bg=st7789.color565(238,228,218), size=2, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+pm1()
+previous_state = 0
+game = Game2048()
+page=1
+ch=1
+while True:
+    gesture = sensor7620.get_gesture(1)
+    if(page==1):
+        if gesture[0] != 0:
+            print(gesture)
+            gesture_code = get_num(gesture[0])
+            print(gesture_code)
+            gesture_name = get_gesture_name(gesture_code)
+            print("检测到手势:", gesture_name)
+            if gesture_code == 8:
+                if ch == 1:
+                    game.reset()
+                    display.fill(st7789.color565(238,228,218))
+                    for j in range(game.size):
+                        for i in range(game.size):
+                            val = game.board[i][j]
+                            if(val!=0):
+                                display.draw_string( i*60+21,j*60+18, switch(val), color=st7789.color565(187,173,160), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+                            print(val, end=' ')
+                        print()
+                    page = 2
+                elif ch == 2:
+                    meth()
+                    page = 3
+                elif ch == 3:
+                    intr()
+                    page = 4
+            elif gesture_code == 3:
+                if ch == 1:
+                    ch = 2
+                    ch2()
+                elif ch == 2:
+                    ch = 3
+                    ch3()
+            elif gesture_code == 4:
+                if ch == 3:
+                    ch = 2
+                    ch2()
+                elif ch == 2:
+                    ch = 1
+                    ch1()
+    elif(page==2):
+        g=1
+        sx=0
+        if imu.dataupdate() and imu.dataready():
+            current_state = classify_acceleration(imu.acc_x(), imu.acc_y())
+            if(previous_state == 0):
+                if(current_state in [1, 2, 3, 4]):
+                    previous_state = current_state
+            elif(previous_state == 1 and current_state == 0):
+                print('向上')
+                game.move('up')
+                sx=1
+                previous_state = 0
+            elif(previous_state == 2 and current_state == 0):
+                print('向下')
+                game.move('down')
+                sx=1
+                previous_state = 0
+            elif(previous_state == 3 and current_state == 0):
+                print('向左')
+                game.move('left')
+                sx=1
+                previous_state = 0
+            elif(previous_state == 4 and current_state == 0):
+                print('向右')
+                game.move('right')
+                sx=1
+                previous_state = 0
+        if gesture[0] != 0:
+            print(gesture)
+            gesture_code = get_num(gesture[0])
+            print(gesture_code)
+            print('1')
+            gesture_name = get_gesture_name(gesture_code)
+            print("检测到手势:", gesture_name)
+            if gesture_code == 4:
+                game.move('up')
+                sx=1
+            elif gesture_code == 3:
+                game.move('down')
+                sx=1
+            elif gesture_code == 2:
+                game.move('left')
+                sx=1
+            elif gesture_code == 1:
+                game.move('right')
+                sx=1
+            elif gesture_code == 7:
+                pm1()
+                page = 1
+            if game.game_over():
+                g=0
+                over()
+                page=5
+                utime.sleep_ms(3000)
+        if(sx==1 and g==1):
+            display.fill(st7789.color565(238,228,218))
+            for j in range(game.size):
+                for i in range(game.size):
+                    val = game.board[i][j]
+                    if(val!=0):
+                        display.draw_string( i*60+21,j*60+18, switch(val), color=st7789.color565(187,173,160), bg=st7789.color565(238,228,218), size=3, vertical=False, rotate=st7789.ROTATE_0, spacing=1)
+                    print(val, end=' ')
+                print()
+    elif(page==3):
+        if gesture[0] != 0:
+            print(gesture)
+            gesture_code = get_num(gesture[0])
+            print(gesture_code)
+            gesture_name = get_gesture_name(gesture_code)
+            print("检测到手势:", gesture_name)
+            if(gesture_code==7):
+                pm1()
+                page = 1
+                ch = 1
+    elif(page==4):
+        if gesture[0] != 0:
+            print(gesture)
+            gesture_code = get_num(gesture[0])
+            print(gesture_code)
+            gesture_name = get_gesture_name(gesture_code)
+            print("检测到手势:", gesture_name)
+            if(gesture_code==7):
+                pm1()
+                page = 1
+                ch = 1
+    elif(page==5):
+        if gesture[0] != 0:
+            print(gesture)
+            gesture_code = get_num(gesture[0])
+            print(gesture_code)
+            gesture_name = get_gesture_name(gesture_code)
+            print("检测到手势:", gesture_name)
+            if(gesture_code==7):
+                pm1()
+                page = 1
+                ch = 1
+utime.sleep_ms(10)
